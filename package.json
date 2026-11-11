@@ -1,6 +1,6 @@
 {
   "name": "@deandret/read-excel-file",
-  "version": "9.3.14-fix.1",
+  "version": "9.4.0",
   "description": "Read `.xlsx` files in a web browser or in Node.js",
   "type": "module",
   "exports": {
