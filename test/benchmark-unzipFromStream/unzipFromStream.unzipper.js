@@ -11,7 +11,7 @@
 
 import { Parse, ZipFileError } from 'unzipper-esm'
 
-import { createUnzipError } from './UnzipError.js'
+import { createUnzipError } from '../../source/zip/UnzipError.js'
 
 const PROMISE_RESOLVE_VALUE = undefined
 

@@ -1,8 +1,12 @@
 // Considerations:
 //
-// * `fflate` uses a pure-javascript implementation of `.zip` compression/decompression by default.
-//   This pure-javascript implementation is about 2x slower than Node.js's "native" `zlib` module.
-//   This issue is worked around by "marrying" `fflate` with Node.js's `zlib` "native" module through some tinkering.
+// * `rflate` is `fflate` with its pure-javascript `DEFLATE` code replaced by a Rust one
+//   compiled to WebAssembly. The API and the `.zip` handling code are `fflate`'s,
+//   so the comments about `fflate` below (and the linked `fflate` issues) apply to it as well.
+//   https://github.com/DeandreT/rflate
+//
+// * `fflate`'s pure-javascript decompressor is about 2x slower than Node.js's "native" `zlib` module,
+//   which is why this code can "marry" the `Unzip` class with Node.js's `zlib` through some tinkering.
 //   https://github.com/101arrowz/fflate/issues/284
 //
 // * Even though `fflate` implements a "streaming" mode of its own,
@@ -62,31 +66,26 @@
 // https://github.com/101arrowz/fflate/issues/277
 // So just the regular `UnzipInflate` is used here.
 //
-import { Unzip } from 'fflate'
-// import { AsyncUnzipInflate, UnzipInflate } from 'fflate'
+import { Unzip, UnzipInflate, AsyncUnzipInflate } from '@deandret/rflate'
 
 import { Buffer } from 'node:buffer'
 import zlib from 'node:zlib'
 
 import UnzipError, { createUnzipError } from './UnzipError.js'
 
-// Native `zlib` is faster than `UnzipInflate`.
-// * When decompressing a `1 MB` `.xlsx` file, the decompression time is `100 ms`
-//   when using `zlib` decompressor and `150 ms` when using `fflate` "sync" decompressor.
-// * When decompressing a `10 MB` `.xlsx` file, the decompression time is `500 ms`
-//   when using `zlib` decompressor and `650 ms` when using `fflate` "sync" decompressor.
-// * When decompressing a `50 MB` `.xlsx` file, the decompression time is `2800 ms`
-//   when using `zlib` decompressor and `3600 ms` when using `fflate` "sync" decompressor.
-const USE_ZLIB_DECOMPRESSOR = true
-
-// `AsyncZipInflate` is faster than `UnzipInflate` for `.xlsx` files that're larger
-// than a few megabytes.
-// * When decompressing a `1 MB` `.xlsx` file, the decompression time is `150 ms`
-//   when using "sync" decompressor and `170 ms` when using "async" decompressor.
-// * When decompressing a `10 MB` `.xlsx` file, the decompression time is about the same.
-// * When decompressing a `50 MB` `.xlsx` file, the decompression time is `3600 ms`
-//   when using "sync" decompressor and `3200 ms` when using "async" decompressor.
-const USE_ASYNC_FFLATE_DECOMPRESSOR = false
+// Which `DEFLATE` decompressor to use by default:
+//
+// * "rflate" — `rflate`'s synchronous WebAssembly decompressor (`UnzipInflate`).
+// * "rflate-async" — `rflate`'s decompressor running in worker threads (`AsyncUnzipInflate`).
+// * "zlib" — Node.js's "native" `zlib` module, which decompresses asynchronously.
+//
+// The decompressors are compared in a benchmark:
+//
+// ```
+// npm run test:benchmark:unzipFromStream
+// ```
+//
+const DEFAULT_DECOMPRESSOR = 'rflate'
 
 const PROMISE_RESOLVE_VALUE = undefined
 
@@ -99,6 +98,19 @@ const PROMISE_RESOLVE_VALUE = undefined
  * @return {Promise<void>}
  */
 export default function unzipFromStream_(stream, onFile, onFileData, onFileDataEnd) {
+	return unzipFromStreamUsingDecompressor(stream, onFile, onFileData, onFileDataEnd, DEFAULT_DECOMPRESSOR)
+}
+
+/**
+ * Reads `*.zip` file contents using a specific `DEFLATE` decompressor.
+ * @param  {Stream} stream
+ * @param  {function} onFile
+ * @param  {function} onFileData
+ * @param  {function} onFileDataEnd
+ * @param  {'rflate' | 'rflate-async' | 'zlib'} decompressor
+ * @return {Promise<void>}
+ */
+export function unzipFromStreamUsingDecompressor(stream, onFile, onFileData, onFileDataEnd, decompressor) {
 	return new Promise((resolve, reject) => {
 		let errored = false
 
@@ -189,7 +201,7 @@ export default function unzipFromStream_(stream, onFile, onFileData, onFileDataE
 		// Register the decompressor for the data that was compressed using
 		// `DEFLATE` compression algorithm (compression method `8`),
 		// which is what `.xlsx` files use.
-		unzip.register(USE_ZLIB_DECOMPRESSOR ? NativeZlibInflate : (USE_ASYNC_FFLATE_DECOMPRESSOR ? AsyncUnzipInflate : UnzipInflate))
+		unzip.register(getDecompressor(decompressor))
 
 		stream
 			// Catch errors emitted from the input stream (for example, a file read error).
@@ -263,23 +275,40 @@ export default function unzipFromStream_(stream, onFile, onFileData, onFileDataE
 // anything "funny" when writing a file, hence this adherence requirement.
 //
 function createZipFileValidator(onValidationResult) {
-	const firstBytesCount = 2
+	const firstBytesCount = 4
 	const firstBytes = []
-	let firstBytesCheckResult
 	return {
 		validateChunk(chunk) {
-			if (firstBytes.length < 2) {
+			if (firstBytes.length < firstBytesCount) {
 				let i = 0
-				while (i < chunk.length && i < firstBytesCount) {
+				while (i < chunk.length && firstBytes.length < firstBytesCount) {
 					firstBytes.push(chunk[i])
 					i++
 				}
-				if (firstBytes.length === 2) {
-					const isValid = firstBytes[0] === 0x50 && firstBytes[1] === 0x4B
+				if (firstBytes.length === firstBytesCount) {
+					// `PK\x03\x04` starts a file entry.
+					// `PK\x05\x06` starts the "summary" section of an archive that has no files.
+					const isValid = firstBytes[0] === 0x50 && firstBytes[1] === 0x4B && (
+						(firstBytes[2] === 0x03 && firstBytes[3] === 0x04) ||
+						(firstBytes[2] === 0x05 && firstBytes[3] === 0x06)
+					)
 					onValidationResult(isValid)
 				}
 			}
 		}
+	}
+}
+
+function getDecompressor(name) {
+	switch (name) {
+		case 'zlib':
+			return NativeZlibInflate
+		case 'rflate-async':
+			return AsyncUnzipInflate
+		case 'rflate':
+			return UnzipInflate
+		default:
+			throw new Error(`Unknown decompressor: ${name}`)
 	}
 }
 

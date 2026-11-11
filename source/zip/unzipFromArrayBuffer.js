@@ -4,7 +4,7 @@
 // This is because using web workers comes with an overhead of
 // both creating a new worker and sending data back and forth.
 //
-import { unzip } from 'fflate'
+import { unzip } from '@deandret/rflate'
 
 import { createUnzipError } from './UnzipError.js'
 import isPossibleFileSize from './isPossibleFileSize.js'

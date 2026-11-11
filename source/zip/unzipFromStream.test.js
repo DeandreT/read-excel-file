@@ -5,9 +5,10 @@ import { describe, it } from 'mocha'
 import { expect } from 'chai'
 
 import { Readable } from 'node:stream'
-import { zipSync, strToU8, strFromU8 } from 'fflate'
+import { zipSync, strToU8, strFromU8 } from '@deandret/rflate'
 
 import unzipFromStream from './unzipFromStream.js'
+import UnzipError from './UnzipError.js'
 
 describe('unzipFromStream', () => {
 	it('should read DEFLATE-compressed entries from a stream', async () => {
@@ -96,6 +97,32 @@ describe('unzipFromStream', () => {
 			thrown = caught
 		}
 		expect(thrown).to.be.an('error')
+	})
+
+	it('should reject on data that only starts with "PK"', async () => {
+		const garbage = Buffer.concat([Buffer.from('PK'), Buffer.alloc(1000, 7)])
+
+		let thrown
+		try {
+			await unzipFromStream(createStreamFromBuffer(garbage))
+		} catch (caught) {
+			thrown = caught
+		}
+		expect(thrown).to.be.an.instanceof(UnzipError)
+	})
+
+	it('should reject on truncated or corrupted archives', async () => {
+		const zip = createZip({ 'a.xml': '<a>Hello</a>'.repeat(5000) })
+
+		for (const invalidZip of [zip.subarray(0, 100), Buffer.concat([zip.subarray(0, 60), Buffer.alloc(200, 0xff), zip.subarray(260)])]) {
+			let thrown
+			try {
+				await unzipFromStream(createStreamFromBuffer(invalidZip))
+			} catch (caught) {
+				thrown = caught
+			}
+			expect(thrown).to.be.an.instanceof(UnzipError)
+		}
 	})
 })
 

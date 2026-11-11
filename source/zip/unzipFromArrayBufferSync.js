@@ -13,7 +13,7 @@
 // or multiple files at once, the "synchronous" API causes the main thread to hang for too long,
 // and the "asynchronous" API is an order of magnitude better.
 //
-import { unzipSync } from 'fflate'
+import { unzipSync } from '@deandret/rflate'
 
 import { unzipFromArrayBufferUsingFunction } from './unzipFromArrayBuffer.js'
 

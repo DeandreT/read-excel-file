@@ -935,9 +935,11 @@ Reading an `.xlsx` file is performed in 3 steps:
 * Step 2. Parse sheet data from those `.xml` files.
 * Step 3. If `schema` option was passed, use it to transform sheet data rows into JSON objects.
 
-When running in Node.js, the unzip step is outsourced to [`unzipper-esm`](https://www.npmjs.com/package/unzipper-esm) and is "asynchronous" — it uses Node.js "native" `zlib` module which unzips data in a separate thread.
+The unzip step is outsourced to [`rflate`](https://www.npmjs.com/package/@deandret/rflate) — [`fflate`](https://npmjs.com/package/fflate)'s API with a decompressor written in Rust and compiled to WebAssembly.
 
-When running in a web browser, the unzip step is outsourced to [fflate](https://npmjs.com/package/fflate) which does it "asynchronously" only for `.xlsx` files larger than `512 KB` (the threshold is [hardcoded](https://github.com/101arrowz/fflate/blob/dcb3714a6c25db3a2748641019c5277413d09714/src/index.ts#L3797-L3804) in `fflate` code).
+When running in Node.js, the unzip step is "synchronous": the file is read as a stream and each chunk of it is decompressed as it arrives.
+
+When running in a web browser, the unzip step is "asynchronous" (it runs in a web worker) only for `.xlsx` files larger than `512 KB` (the threshold is [hardcoded](https://github.com/101arrowz/fflate/blob/dcb3714a6c25db3a2748641019c5277413d09714/src/index.ts#L3797-L3804) in `fflate` code, which `rflate` shares).
 
 The XML parsing step is written using [saxen](https://www.npmjs.com/package/saxen) which is a [SAX parser](https://en.wikipedia.org/wiki/Simple_API_for_XML). This step "synchronous".
 
@@ -946,7 +948,7 @@ The last step of transforming sheet data rows to JSON objects is also "synchrono
 
 ## Browser Support
 
-An `.xlsx` file is just a `.zip` archive with an `.xslx` file extension. This package uses [`fflate`](https://www.npmjs.com/package/fflate) for `.zip` decompression. See `fflate`'s [browser support](https://www.npmjs.com/package/fflate#browser-support) for further details.
+An `.xlsx` file is just a `.zip` archive with an `.xslx` file extension. This package uses [`rflate`](https://www.npmjs.com/package/@deandret/rflate) for `.zip` decompression, which requires WebAssembly with SIMD: Chrome 91, Firefox 89, Safari 16.4, Node.js 16.4, or newer. Web pages with a strict Content Security Policy need `'wasm-unsafe-eval'` in `script-src`.
 
 ## CDN
 
@@ -982,8 +984,7 @@ Finally, one could go even further with the "streaming" approach and output not 
 
 ## Dependencies
 
-* [`fflate`](https://www.npmjs.com/package/fflate) — Unzips `.zip` archives in web browsers.
-* [`unzipper-esm`](https://www.npmjs.com/package/unzipper-esm) — Unzips `.zip` archives in Node.js using `stream` API.
+* [`rflate`](https://www.npmjs.com/package/@deandret/rflate) — Unzips `.zip` archives in web browsers and in Node.js.
 * [`saxen`](https://www.npmjs.com/package/saxen) — Parses XML in a streaming fashion.
 
 ## Contributors

@@ -8,9 +8,11 @@
 // wouldn't result in any performance improvements, so currently it simply returns
 // a "map" of all files in the input `.zip` archive, and that seems to be enough.
 //
-// Currently, there're two decompressor implementations:
-// * `fflate` — a pure-javascript implementation that uses `fflate` package.
-// * `unzipper` — a "native" Node.js module that uses Node's `zlib` which is written in C.
+// Currently, there're two `.zip` reader implementations:
+// * `rflate` — uses `rflate` package: `fflate`'s `.zip` reader with a `DEFLATE` decompressor
+//   written in Rust and compiled to WebAssembly. It could also use Node's `zlib` instead.
+// * `unzipper` — uses `unzipper-esm` package that uses Node's "native" `zlib` which is written in C.
+//   It is only kept for the benchmark: see `test/benchmark-unzipFromStream`.
 //
 // The implementations are compared in a benchmark:
 //
@@ -18,53 +20,32 @@
 // npm run test:benchmark:unzipFromStream
 // ```
 //
-// The benchmark tells that `unzipper` is 2x faster than `fflate` with the default `ZipInflate` decompressor.
+// The benchmark tells that `rflate` is about 2.5x faster than `unzipper`:
 //
-// However, when swapping `fflate`'s default `ZipInflate` decompressor with a custom
-// "native" `zlib` one, `fflate` happens to be about 20% faster than `unzipper`.
+// * When decompressing a `1 MB` `.xlsx` file, the decompression time is `40 ms`
+//   when using `rflate` and `115 ms` when using `unzipper`.
+// * When decompressing a `10 MB` `.xlsx` file, the decompression time is `150 ms`
+//   when using `rflate` and `430 ms` when using `unzipper`.
+// * When decompressing a `50 MB` `.xlsx` file, the decompression time is `1400 ms`
+//   when using `rflate` and `3500 ms` when using `unzipper`.
 //
-// Still, when measuring the total time of parsing `.xlsx` files,
-// the time difference becomes unmeasurable between `unzipper`
-// and `fflate` with "native" `zlib` decompressor,
-// as could be seen by running `npm run test:benchmark` command
-// where `fflate` is slightly faster than `unzipper`.
+// `rflate` with Node's `zlib` decompressor is about as fast as `unzipper`, and `rflate`
+// with its decompressor running in worker threads is 2x slower on a `1 MB` file
+// and 2x faster on a `50 MB` one.
 //
-// * When decompressing a `1 MB` `.xlsx` file, the decompression time is `90 ms`
-//   when using `fflate` with `zlib` decompressor and `100 ms` when using `unzipper` decompressor.
-// * When decompressing a `10 MB` `.xlsx` file, the decompression time is `530 ms`
-//   when using `fflate` with `zlib` decompressor and `550 ms` when using `unzipper` decompressor.
-// * When decompressing a `50 MB` `.xlsx` file, the decompression time is `2800 ms`
-//   when using `fflate` with `zlib` decompressor and `3000 ms` when using `unzipper` decompressor.
+// So `rflate` is used. Things to know about it when compared to `unzipper`:
 //
-// So, at the end of the day, there's no substantial difference between the two
-// when it comes to parsing `.xlsx` files, and one may choose depending on personal preference.
-//
-// And my personal preference leans towards `unzipper` because:
-//
-// * I personally refactored it into `unzipper-esm` in about 5-6 hours.
-//   https://github.com/ZJONSSON/node-unzipper/pull/356
-//
-// * It is designed as a Node.js-first module, i.e. it is designed around the concept
-//   of Node.js streams "from the ground up". Meanwhile, `fflate` is a "universal" module
-//   and it does not implement Node.js streams "contract", i.e. it just unzips the archive
-//   as fast as it can consume it from the input stream, without throttling the data throughput
-//   in cases when the input data flows faster than `fflate` can process it. This means that
-//   in the "worst case" scenario when `fflate`'s decompressor is unable to keep up with the
-//   data influx, it would "buffer" the entire `.zip` archive in RAM until it's processed.
-//   And while this is no big deal by any means, it's still not as elegant as adhering to
-//   Node.js streaming protocol.
-//
-// * `unzipper` uses native `zlib` decompressor which `fflate` doesn't officially include
-//   and it had to be hacked into it using a couple of tricks. That's also no big deal,
-//   but still a slightly weird experience.
+// * `unzipper` is designed around the concept of Node.js streams "from the ground up".
+//   Meanwhile, `fflate`'s (and `rflate`'s) `Unzip` class does not implement Node.js streams
+//   "contract", i.e. it just unzips the archive as fast as it can consume it from the input stream.
+//   Since the decompressor is synchronous, each chunk of the input is fully processed
+//   before the next one is read, so the input is not buffered in RAM.
 //
 // * Rumors are circulating that `fflate`'s "streaming" `Zip`/`Unzip` classes have a few
 //   implementation issues when compared to non-"streaming" `zipSync`/`unzipSync`/`zip`/`unzip` functions.
-//   Some people even suggested in the comments that `Zip`/`Unzip` classes are not really production-ready
-//   when compared to `zipSync`/`unzipSync`/`zip`/`unzip` functions.
 //   https://github.com/101arrowz/fflate/issues/282
 //
-import unzipFromStream_ from './unzipFromStream.unzipper.js'
+import unzipFromStream_ from './unzipFromStream.rflate.js'
 
 /**
  * Reads `*.zip` file contents.

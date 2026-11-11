@@ -4,7 +4,7 @@
 //
 // But `woker-f` package is currently not used, so this `import` is not commented out.
 //
-import { strFromU8 as strFromU8_ } from 'fflate'
+import { strFromU8 as strFromU8_ } from '@deandret/rflate'
 
 import checkpoint from './checkpoint.js'
 

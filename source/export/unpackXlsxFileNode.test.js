@@ -4,7 +4,7 @@
 import { describe, it } from 'mocha'
 import { expect } from 'chai'
 
-import { zipSync, strToU8 } from 'fflate'
+import { zipSync, strToU8 } from '@deandret/rflate'
 
 import { Readable } from 'node:stream'
 
@@ -87,7 +87,7 @@ describe('unpackXlsxFileNode', () => {
 		// places in it and it'd still be a valid `.zip` archive. It's likely that for this reason
 		// `fflate` doesn't ever complain and simply emits no entries when fed any kind of invalid data.
 		//
-		// So in case of using `unzipFromStream.fflate.js`, `thrown` will be `undefined`.
+		// So in case of using `unzipFromStream.rflate.js`, `thrown` will be `undefined`.
 		// But it won't be `undefined` in case of using `unzipFromStream.unzipper.js`.
 		//
 		if (thrown) {

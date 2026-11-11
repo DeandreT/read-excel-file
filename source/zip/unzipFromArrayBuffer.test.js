@@ -1,7 +1,7 @@
 import { describe, it } from 'mocha'
 import { expect } from 'chai'
 
-import { zipSync, strToU8 } from 'fflate'
+import { zipSync, strToU8 } from '@deandret/rflate'
 
 import unzipFromArrayBuffer from './unzipFromArrayBuffer.js'
 import UnzipError from './UnzipError.js'
